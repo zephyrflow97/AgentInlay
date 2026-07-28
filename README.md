@@ -50,7 +50,7 @@ AgentInlay 当前专注于可靠的本地工作流，并为未来接入 AI Agent
 
 ## 安装
 
-AgentInlay 要求 Obsidian `1.8.0` 或更高版本。
+AgentInlay 要求 Obsidian `1.13.0` 或更高版本。
 
 1. 下载并解压安装包，得到名为 `agent-inlay` 的文件夹。
 2. 将该文件夹放入 Vault 的 `.obsidian/plugins/` 目录。

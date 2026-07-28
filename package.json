@@ -11,7 +11,13 @@
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint ."
 	},
-	"keywords": ["obsidian", "ai-agent", "dashboard", "knowledge-management", "local-first"],
+	"keywords": [
+		"obsidian",
+		"ai-agent",
+		"dashboard",
+		"knowledge-management",
+		"local-first"
+	],
 	"license": "MIT",
 	"devDependencies": {
 		"@eslint/js": "^9.39.4",
@@ -21,8 +27,8 @@
 		"eslint-plugin-obsidianmd": "^0.4.0",
 		"globals": "^17.6.0",
 		"jiti": "^2.6.1",
-		"obsidian": "^1.12.3",
-		"typescript": "^5.8.3",
+		"obsidian": "^1.13.1",
+		"typescript": "^6.0.3",
 		"typescript-eslint": "^8.59.1"
 	}
 }

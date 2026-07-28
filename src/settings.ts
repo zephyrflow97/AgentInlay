@@ -1,4 +1,12 @@
-import { AbstractInputSuggest, App, normalizePath, PluginSettingTab, Setting, TFile, TFolder } from 'obsidian';
+import {
+	App,
+	normalizePath,
+	PluginSettingTab,
+	TFile,
+	TFolder,
+	type SettingDefinition,
+	type SettingDefinitionItem,
+} from 'obsidian';
 import type AgentInlayPlugin from './main';
 import { DEFAULT_CARD_ORDER, DEFAULT_CARD_SIZES } from './cards/registry';
 import type { DashboardCardId, DashboardCardSize } from './cards/types';
@@ -25,6 +33,27 @@ export interface DashboardCrop {
 	x: number;
 	y: number;
 }
+
+type CropSettingKey = 'coverCrop' | 'avatarCrop' | 'galleryCrop';
+type CropProperty = keyof DashboardCrop;
+type CropControlKey = `${CropSettingKey}.${CropProperty}`;
+type DirectSettingKey =
+	| 'fontFamily'
+	| 'size'
+	| 'density'
+	| 'bubbleFontFamily'
+	| 'bubbleSize'
+	| 'theme'
+	| 'greeting'
+	| 'coverMode'
+	| 'diaryFolder'
+	| 'projectLogFolder'
+	| 'inboxFolder'
+	| 'inspirationFolder'
+	| 'taskFilePath'
+	| 'openOnStartup'
+	| 'openWhenEmpty';
+type SettingKey = DirectSettingKey | CropControlKey;
 
 export interface AgentInlaySettings {
 	configVersion: 1;
@@ -53,6 +82,34 @@ export interface AgentInlaySettings {
 }
 
 const DEFAULT_CROP: DashboardCrop = { zoom: 100, x: 50, y: 50 };
+const DIRECT_SETTING_KEYS: ReadonlySet<string> = new Set<DirectSettingKey>([
+	'fontFamily',
+	'size',
+	'density',
+	'bubbleFontFamily',
+	'bubbleSize',
+	'theme',
+	'greeting',
+	'coverMode',
+	'diaryFolder',
+	'projectLogFolder',
+	'inboxFolder',
+	'inspirationFolder',
+	'taskFilePath',
+	'openOnStartup',
+	'openWhenEmpty',
+]);
+const CROP_BINDINGS: Record<CropControlKey, readonly [CropSettingKey, CropProperty]> = {
+	'coverCrop.zoom': ['coverCrop', 'zoom'],
+	'coverCrop.x': ['coverCrop', 'x'],
+	'coverCrop.y': ['coverCrop', 'y'],
+	'avatarCrop.zoom': ['avatarCrop', 'zoom'],
+	'avatarCrop.x': ['avatarCrop', 'x'],
+	'avatarCrop.y': ['avatarCrop', 'y'],
+	'galleryCrop.zoom': ['galleryCrop', 'zoom'],
+	'galleryCrop.x': ['galleryCrop', 'x'],
+	'galleryCrop.y': ['galleryCrop', 'y'],
+};
 
 export const DEFAULT_SETTINGS: AgentInlaySettings = {
 	configVersion: 1,
@@ -161,32 +218,12 @@ function isDashboardTheme(value: unknown): value is DashboardTheme {
 		|| value === 'graphite' || value === 'citrus' || value === 'coral' || value === 'violet' || value === 'midnight';
 }
 
-class FolderSuggest extends AbstractInputSuggest<TFolder> {
-	constructor(
-		app: App,
-		inputEl: HTMLInputElement,
-		private readonly onFolderSelect: (value: string) => void,
-	) {
-		super(app, inputEl);
-	}
+function isDirectSettingKey(value: string): value is DirectSettingKey {
+	return DIRECT_SETTING_KEYS.has(value);
+}
 
-	getSuggestions(query: string): TFolder[] {
-		const normalized = query.trim().toLocaleLowerCase();
-		return this.app.vault.getAllLoadedFiles()
-			.filter((file): file is TFolder => file instanceof TFolder)
-			.filter((folder) => folder.path !== '/' && folder.path.toLocaleLowerCase().includes(normalized))
-			.slice(0, 50);
-	}
-
-	renderSuggestion(folder: TFolder, el: HTMLElement): void {
-		el.setText(folder.path);
-	}
-
-	selectSuggestion(folder: TFolder): void {
-		this.setValue(folder.path);
-		this.onFolderSelect(folder.path);
-		this.close();
-	}
+function isCropControlKey(value: string): value is CropControlKey {
+	return value in CROP_BINDINGS;
 }
 
 export class AgentInlaySettingTab extends PluginSettingTab {
@@ -194,227 +231,328 @@ export class AgentInlaySettingTab extends PluginSettingTab {
 		super(app, plugin);
 	}
 
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
-
-		new Setting(containerEl).setName('显示偏好').setHeading();
-
-		new Setting(containerEl)
-			.setName('欢迎语')
-			.setDesc('修改仪表盘顶部主标题。')
-			.addText((text) => text
-				.setPlaceholder(DEFAULT_SETTINGS.greeting)
-				.setValue(this.plugin.settings.greeting)
-				.onChange(async (value) => this.patch({ greeting: value || DEFAULT_SETTINGS.greeting })));
-
-		new Setting(containerEl)
-			.setName('主题色')
-			.setDesc('从克制低饱和到明快高饱和，也包含完整深色模式。')
-			.addDropdown((dropdown) => dropdown
-				.addOption('forest', '松林 · 中饱和绿')
-				.addOption('mist', '湖雾 · 低饱和蓝')
-				.addOption('clay', '陶土 · 低饱和暖棕')
-				.addOption('indigo', '暮蓝 · 中饱和靛蓝')
-				.addOption('graphite', '石墨 · 中性灰')
-				.addOption('citrus', '青柠 · 高饱和黄绿')
-				.addOption('coral', '珊瑚 · 高饱和暖红')
-				.addOption('violet', '紫藤 · 高饱和紫')
-				.addOption('midnight', '深夜 · 深色模式')
-				.setValue(this.plugin.settings.theme)
-				.onChange(async (value) => this.patch({ theme: value as DashboardTheme })));
-
-		new Setting(containerEl)
-			.setName('界面字体')
-			.setDesc('输入系统中已安装字体的准确名称。')
-			.addText((text) => text
-				.setPlaceholder('输入 Windows 字体名称')
-				.setValue(this.plugin.settings.fontFamily)
-				.onChange(async (value) => this.patch({ fontFamily: value })));
-
-		new Setting(containerEl)
-			.setName('界面字号')
-			.setDesc('调整所有卡片的基础字号。')
-			.addDropdown((dropdown) => dropdown
-				.addOption('tiny', '较小 · 13 px')
-				.addOption('small', '小号 · 14 px')
-				.addOption('medium', '标准 · 16 px')
-				.addOption('large', '大号 · 18 px')
-				.addOption('xlarge', '加大 · 20 px')
-				.addOption('xxlarge', '特大 · 22 px')
-				.setValue(this.plugin.settings.size)
-				.onChange(async (value) => this.patch({ size: value as DashboardSize })));
-
-		new Setting(containerEl)
-			.setName('布局密度')
-			.setDesc('高密度布局整体缩小并增加桌面列数；标准布局保留舒展间距。')
-			.addDropdown((dropdown) => dropdown
-				.addOption('dense', '高密度')
-				.addOption('comfortable', '标准')
-				.setValue(this.plugin.settings.density)
-				.onChange(async (value) => this.patch({ density: value as DashboardDensity })));
-
-		new Setting(containerEl).setName('气泡文字').setHeading();
-
-		new Setting(containerEl)
-			.setName('气泡字形')
-			.setDesc('影响顶部操作、状态胶囊和布局控制，不改变待办正文。')
-			.addText((text) => text
-				.setPlaceholder('输入气泡字体名称')
-				.setValue(this.plugin.settings.bubbleFontFamily)
-				.onChange(async (value) => this.patch({ bubbleFontFamily: value })));
-
-		new Setting(containerEl)
-			.setName('气泡字号')
-			.setDesc('调整顶部操作、状态胶囊和布局控制的字号。')
-			.addSlider((slider) => slider
-				.setLimits(11, 18, 1)
-				.setDynamicTooltip()
-				.setValue(this.plugin.settings.bubbleSize)
-				.onChange(async (value) => this.patch({ bubbleSize: value })));
-
-		new Setting(containerEl).setName('顶部背景').setHeading();
-
-		new Setting(containerEl)
-			.setName('呈现方式')
-			.setDesc('在气泡卡片与向下渐变融入背景之间切换。')
-			.addDropdown((dropdown) => dropdown
-				.addOption('card', '气泡卡片')
-				.addOption('fade', '渐变融入')
-				.setValue(this.plugin.settings.coverMode)
-				.onChange(async (value) => this.patch({ coverMode: value as DashboardCoverMode })));
-
-		new Setting(containerEl).setName('图片裁剪').setHeading();
-		this.addCropControls(containerEl, '顶部背景', 'coverCrop');
-		this.addCropControls(containerEl, '头像', 'avatarCrop');
-		this.addCropControls(containerEl, '相框照片', 'galleryCrop');
-
-		new Setting(containerEl).setName('知识库目录').setHeading();
-		this.addFolderSetting(containerEl, '日记目录', '每篇新日记保存的位置。', 'diaryFolder');
-		this.addFolderSetting(containerEl, '项目日志目录', '每篇新项目日志保存的位置。', 'projectLogFolder');
-		this.addFolderSetting(containerEl, '收件箱目录', '临时笔记与待整理资料保存的位置；积压数量会递归统计其中的全部文件。', 'inboxFolder');
-		this.addFolderSetting(containerEl, '灵感库目录', '每日灵感记录保存的位置。', 'inspirationFolder');
-
-		new Setting(containerEl).setName('任务与启动').setHeading();
-		const taskFileSetting = new Setting(containerEl)
-			.setName('任务文件')
-			.addText((text) => text
-				.setPlaceholder(DEFAULT_SETTINGS.taskFilePath)
-				.setValue(this.plugin.settings.taskFilePath)
-				.onChange(async (value) => {
-					this.updateTaskFileDescription(taskFileSetting, value);
-					await this.patch({ taskFilePath: value });
-				}));
-		this.updateTaskFileDescription(taskFileSetting, this.plugin.settings.taskFilePath);
-
-		new Setting(containerEl)
-			.setName('启动时打开工作台')
-			.setDesc('Obsidian 完成布局加载后打开工作台，并自动刷新一次。')
-			.addToggle((toggle) => toggle
-				.setValue(this.plugin.settings.openOnStartup)
-				.onChange(async (value) => this.patch({ openOnStartup: value })));
-
-		new Setting(containerEl)
-			.setName('关闭所有页面后打开工作台')
-			.setDesc('主编辑区没有其他页面时打开工作台，并自动刷新一次。')
-			.addToggle((toggle) => toggle
-				.setValue(this.plugin.settings.openWhenEmpty)
-				.onChange(async (value) => this.patch({ openWhenEmpty: value })));
-
-		new Setting(containerEl).setName('卡片布局').setHeading();
-		new Setting(containerEl)
-			.setName('恢复推荐布局')
-			.setDesc('紧凑、标准、加宽分别占 1×1、1×2、1×3；卡片在仪表盘中可拖动排序。')
-			.addButton((button) => button
-				.setButtonText('恢复')
-				.onClick(async () => this.patch({
-					cardOrder: [...DEFAULT_CARD_ORDER],
-					cardSizes: { ...DEFAULT_CARD_SIZES },
-				})));
+	getSettingDefinitions(): SettingDefinitionItem<SettingKey>[] {
+		return [
+			{
+				type: 'group',
+				heading: '显示偏好',
+				items: [
+					{
+						name: '欢迎语',
+						desc: '修改仪表盘顶部主标题。',
+						control: {
+							type: 'text',
+							key: 'greeting',
+							defaultValue: DEFAULT_SETTINGS.greeting,
+							placeholder: DEFAULT_SETTINGS.greeting,
+						},
+					},
+					{
+						name: '主题色',
+						desc: '从克制低饱和到明快高饱和，也包含完整深色模式。',
+						control: {
+							type: 'dropdown',
+							key: 'theme',
+							defaultValue: DEFAULT_SETTINGS.theme,
+							options: {
+								forest: '松林 · 中饱和绿',
+								mist: '湖雾 · 低饱和蓝',
+								clay: '陶土 · 低饱和暖棕',
+								indigo: '暮蓝 · 中饱和靛蓝',
+								graphite: '石墨 · 中性灰',
+								citrus: '青柠 · 高饱和黄绿',
+								coral: '珊瑚 · 高饱和暖红',
+								violet: '紫藤 · 高饱和紫',
+								midnight: '深夜 · 深色模式',
+							},
+						},
+					},
+					{
+						name: '界面字体',
+						desc: '输入系统中已安装字体的准确名称。',
+						control: {
+							type: 'text',
+							key: 'fontFamily',
+							defaultValue: DEFAULT_SETTINGS.fontFamily,
+							placeholder: '输入系统字体名称',
+						},
+					},
+					{
+						name: '界面字号',
+						desc: '调整所有卡片的基础字号。',
+						control: {
+							type: 'dropdown',
+							key: 'size',
+							defaultValue: DEFAULT_SETTINGS.size,
+							options: {
+								tiny: '较小 · 13 px',
+								small: '小号 · 14 px',
+								medium: '标准 · 16 px',
+								large: '大号 · 18 px',
+								xlarge: '加大 · 20 px',
+								xxlarge: '特大 · 22 px',
+							},
+						},
+					},
+					{
+						name: '布局密度',
+						desc: '高密度布局整体缩小并增加桌面列数；标准布局保留舒展间距。',
+						control: {
+							type: 'dropdown',
+							key: 'density',
+							defaultValue: DEFAULT_SETTINGS.density,
+							options: {
+								dense: '高密度',
+								comfortable: '标准',
+							},
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: '气泡文字',
+				items: [
+					{
+						name: '气泡字形',
+						desc: '影响顶部操作、状态胶囊和布局控制，不改变待办正文。',
+						control: {
+							type: 'text',
+							key: 'bubbleFontFamily',
+							defaultValue: DEFAULT_SETTINGS.bubbleFontFamily,
+							placeholder: '输入气泡字体名称',
+						},
+					},
+					{
+						name: '气泡字号',
+						desc: '调整顶部操作、状态胶囊和布局控制的字号。',
+						control: {
+							type: 'slider',
+							key: 'bubbleSize',
+							defaultValue: DEFAULT_SETTINGS.bubbleSize,
+							min: 11,
+							max: 18,
+							step: 1,
+							displayFormat: (value) => `${value}px`,
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: '顶部背景',
+				items: [
+					{
+						name: '呈现方式',
+						desc: '在气泡卡片与向下渐变融入背景之间切换。',
+						control: {
+							type: 'dropdown',
+							key: 'coverMode',
+							defaultValue: DEFAULT_SETTINGS.coverMode,
+							options: {
+								card: '气泡卡片',
+								fade: '渐变融入',
+							},
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: '图片裁剪',
+				items: [
+					...this.cropDefinitions('顶部背景', 'coverCrop'),
+					...this.cropDefinitions('头像', 'avatarCrop'),
+					...this.cropDefinitions('相框照片', 'galleryCrop'),
+				],
+			},
+			{
+				type: 'group',
+				heading: '知识库目录',
+				items: [
+					this.folderDefinition('日记目录', '每篇新日记保存的位置。', 'diaryFolder'),
+					this.folderDefinition('项目日志目录', '每篇新项目日志保存的位置。', 'projectLogFolder'),
+					this.folderDefinition(
+						'收件箱目录',
+						'临时笔记与待整理资料保存的位置；积压数量会递归统计其中的全部文件。',
+						'inboxFolder',
+					),
+					this.folderDefinition('灵感库目录', '每日灵感记录保存的位置。', 'inspirationFolder'),
+				],
+			},
+			{
+				type: 'group',
+				heading: '任务与启动',
+				items: [
+					{
+						name: '任务文件',
+						desc: '日历与日常待办共用此文件；首次保存任务时可以创建文件，但不会自动创建文件夹。',
+						control: {
+							type: 'text',
+							key: 'taskFilePath',
+							defaultValue: DEFAULT_SETTINGS.taskFilePath,
+							placeholder: DEFAULT_SETTINGS.taskFilePath,
+							validate: (value) => this.validateTaskFile(value),
+						},
+					},
+					{
+						name: '启动时打开工作台',
+						desc: 'Obsidian 完成布局加载后打开工作台，并自动刷新一次。',
+						control: {
+							type: 'toggle',
+							key: 'openOnStartup',
+							defaultValue: DEFAULT_SETTINGS.openOnStartup,
+						},
+					},
+					{
+						name: '关闭所有页面后打开工作台',
+						desc: '主编辑区没有其他页面时打开工作台，并自动刷新一次。',
+						control: {
+							type: 'toggle',
+							key: 'openWhenEmpty',
+							defaultValue: DEFAULT_SETTINGS.openWhenEmpty,
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: '卡片布局',
+				items: [
+					{
+						name: '恢复推荐布局',
+						desc: '紧凑、标准、加宽分别占 1×1、1×2、1×3；卡片在仪表盘中可拖动排序。',
+						render: (setting) => {
+							setting.addButton((button) => button
+								.setButtonText('恢复')
+								.onClick(async () => {
+									await this.patch({
+										cardOrder: [...DEFAULT_CARD_ORDER],
+										cardSizes: { ...DEFAULT_CARD_SIZES },
+									});
+									this.update();
+								}));
+						},
+					},
+				],
+			},
+		];
 	}
 
-	private addFolderSetting(
-		container: HTMLElement,
+	getControlValue(key: string): unknown {
+		if (isCropControlKey(key)) {
+			const [settingKey, property] = CROP_BINDINGS[key];
+			return this.plugin.settings[settingKey][property];
+		}
+		return isDirectSettingKey(key) ? this.plugin.settings[key] : undefined;
+	}
+
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (isCropControlKey(key)) {
+			if (typeof value !== 'number') return;
+			const [settingKey, property] = CROP_BINDINGS[key];
+			await this.plugin.updateSettings(normalizeSettings({
+				...this.plugin.settings,
+				[settingKey]: {
+					...this.plugin.settings[settingKey],
+					[property]: value,
+				},
+			}));
+			return;
+		}
+		if (!isDirectSettingKey(key)) return;
+		await this.plugin.updateSettings(normalizeSettings({ ...this.plugin.settings, [key]: value }));
+	}
+
+	private folderDefinition(
 		name: string,
 		description: string,
 		key: 'diaryFolder' | 'projectLogFolder' | 'inboxFolder' | 'inspirationFolder',
-	): void {
-		const setting = new Setting(container).setName(name);
-		const saveFolder = async (value: string): Promise<void> => {
-			this.updateFolderDescription(setting, description, value);
-			await this.patch({ [key]: value });
+	): SettingDefinition<SettingKey> {
+		return {
+			name,
+			desc: `${description} 请选择知识库中已经存在的目录。`,
+			control: {
+				type: 'folder',
+				key,
+				placeholder: '选择知识库目录',
+				includeRoot: false,
+				filter: (folder) => this.isAllowedFolder(folder),
+				validate: (value) => this.validateFolder(value),
+			},
 		};
-		setting.addText((text) => {
-				text.setPlaceholder('选择或输入知识库中已有目录')
-					.setValue(this.plugin.settings[key])
-					.onChange(saveFolder);
-				new FolderSuggest(this.app, text.inputEl, (value) => void saveFolder(value));
-			});
-		this.updateFolderDescription(setting, description, this.plugin.settings[key]);
 	}
 
-	private updateFolderDescription(setting: Setting, description: string, value: string): void {
-		const path = value.trim();
-		if (!path) {
-			setting.setDesc(`${description} 当前未配置。`);
-			return;
-		}
-		const folder = this.app.vault.getAbstractFileByPath(normalizePath(path));
-		setting.setDesc(folder instanceof TFolder ? `${description} 目录有效，已保存。` : `${description} 找不到此目录。`);
+	private isAllowedFolder(folder: TFolder): boolean {
+		const configDir = normalizePath(this.app.vault.configDir);
+		return folder.path !== configDir && !folder.path.startsWith(`${configDir}/`);
 	}
 
-	private updateTaskFileDescription(setting: Setting, value: string): void {
-		const path = normalizePath(value.trim());
-		if (!path.toLowerCase().endsWith('.md')) {
-			setting.setDesc('任务文件必须是有效的 Markdown 文件路径。');
-			return;
+	private validateFolder(value: string): string | void {
+		const input = value.trim();
+		if (!input) return;
+		const path = normalizePath(input);
+		if (path === '/') return '请选择 Vault 根目录以外的目录。';
+		const folder = this.app.vault.getAbstractFileByPath(path);
+		if (!(folder instanceof TFolder)) return '找不到此目录。';
+		if (!this.isAllowedFolder(folder)) return '笔记目录不能位于 Obsidian 配置目录中。';
+	}
+
+	private validateTaskFile(value: string): string | void {
+		const input = value.trim();
+		if (!input) return '任务文件路径不能为空。';
+		const path = normalizePath(input);
+		if (path === '/' || !path.toLowerCase().endsWith('.md')) return '任务文件必须是有效的 Markdown 文件路径。';
+		if (path === this.app.vault.configDir || path.startsWith(`${this.app.vault.configDir}/`)) {
+			return '任务文件不能位于 Obsidian 配置目录中。';
 		}
 		const existing = this.app.vault.getAbstractFileByPath(path);
-		if (existing instanceof TFile) {
-			setting.setDesc('任务文件有效；日历与日常待办会共用此文件。');
-			return;
-		}
+		if (existing && !(existing instanceof TFile)) return '任务文件路径指向的不是 Markdown 文件。';
 		const separator = path.lastIndexOf('/');
 		const parentPath = separator >= 0 ? path.slice(0, separator) : '';
 		const parent = parentPath ? this.app.vault.getAbstractFileByPath(parentPath) : null;
-		setting.setDesc(!parentPath || parent instanceof TFolder
-			? '文件将在首次保存任务时创建；不会自动创建文件夹。'
-			: '任务文件所在目录不存在。');
+		if (parentPath && !(parent instanceof TFolder)) return '任务文件所在目录不存在。';
 	}
 
-	private addCropControls(
-		container: HTMLElement,
-		label: string,
-		key: 'coverCrop' | 'avatarCrop' | 'galleryCrop',
-	): void {
-		const crop = this.plugin.settings[key];
-		this.addCropSlider(container, `${label} · 缩放`, crop.zoom, 100, 200, 5, async (zoom) => {
-			await this.patch({ [key]: { ...this.plugin.settings[key], zoom } });
-		});
-		this.addCropSlider(container, `${label} · 水平位置`, crop.x, 0, 100, 1, async (x) => {
-			await this.patch({ [key]: { ...this.plugin.settings[key], x } });
-		});
-		this.addCropSlider(container, `${label} · 垂直位置`, crop.y, 0, 100, 1, async (y) => {
-			await this.patch({ [key]: { ...this.plugin.settings[key], y } });
-		});
-	}
-
-	private addCropSlider(
-		container: HTMLElement,
-		name: string,
-		value: number,
-		minimum: number,
-		maximum: number,
-		step: number,
-		onChange: (value: number) => Promise<void>,
-	): void {
-		new Setting(container)
-			.setName(name)
-			.addSlider((slider) => slider
-				.setLimits(minimum, maximum, step)
-				.setDynamicTooltip()
-				.setValue(value)
-				.onChange(onChange));
+	private cropDefinitions(label: string, key: CropSettingKey): SettingDefinition<SettingKey>[] {
+		return [
+			{
+				name: `${label} · 缩放`,
+				control: {
+					type: 'slider',
+					key: `${key}.zoom`,
+					defaultValue: DEFAULT_CROP.zoom,
+					min: 100,
+					max: 200,
+					step: 5,
+					displayFormat: (value) => `${value}%`,
+				},
+			},
+			{
+				name: `${label} · 水平位置`,
+				control: {
+					type: 'slider',
+					key: `${key}.x`,
+					defaultValue: DEFAULT_CROP.x,
+					min: 0,
+					max: 100,
+					step: 1,
+					displayFormat: (value) => `${value}%`,
+				},
+			},
+			{
+				name: `${label} · 垂直位置`,
+				control: {
+					type: 'slider',
+					key: `${key}.y`,
+					defaultValue: DEFAULT_CROP.y,
+					min: 0,
+					max: 100,
+					step: 1,
+					displayFormat: (value) => `${value}%`,
+				},
+			},
+		];
 	}
 
 	private async patch(patch: Partial<AgentInlaySettings>): Promise<void> {

@@ -4,6 +4,7 @@
 
 - 初始化 AgentInlay 仓库，并将开发文件放在仓库根目录。
 - 补充领域词汇和架构说明，为后续嵌入 AI Agent 做准备。
+- 升级至 TypeScript 6，并将设置页迁移到 Obsidian 1.13 声明式设置 API。
 
 ## 1.0.0
 

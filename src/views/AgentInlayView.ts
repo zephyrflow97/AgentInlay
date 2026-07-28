@@ -727,7 +727,7 @@ export class AgentInlayView extends ItemView {
 			total.setText(`${String(this.taskState.length).padStart(2, '0')} 项`);
 		};
 		this.renderTasks = render;
-		this.registerDomEvent(add, 'click', () => setFormVisible(form.hidden));
+		this.registerDomEvent(add, 'click', () => setFormVisible(Boolean(form.hidden)));
 		this.registerDomEvent(cancel, 'click', () => {
 			form.reset();
 			setFormVisible(false);
